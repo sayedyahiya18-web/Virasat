@@ -4735,7 +4735,7 @@
       if (guideTrigger) guideTrigger.classList.remove('city-active', 'active-open');
       const guideWin = document.getElementById('guideWindow');
       if (guideWin) guideWin.classList.remove('open');
-      if (typeof stopGuideSpeech === 'function') stopGuideSpeech();
+      if (typeof silenceGuide === 'function') silenceGuide();
 
       if (activePlaceMarker) {
         map.removeLayer(activePlaceMarker);
@@ -5894,7 +5894,7 @@
           if (isOpen) {
             syncGuideToCurrentContext(true);
           } else {
-            stopGuideSpeech();
+            silenceGuide();
           }
         });
       }
@@ -5903,7 +5903,7 @@
         closeBtn.addEventListener('click', () => {
           win.classList.remove('open');
           trigger?.classList.remove('active-open');
-          stopGuideSpeech();
+          silenceGuide();
         });
       }
 
@@ -5912,7 +5912,8 @@
         autoCheck.addEventListener('change', (e) => {
           isAutoGuideEnabled = e.target.checked;
           try { localStorage.setItem('virasat_guide_auto', isAutoGuideEnabled ? '1' : '0'); } catch (err) {}
-          if (isAutoGuideEnabled) syncGuideToCurrentContext(true);
+          if (!isAutoGuideEnabled) silenceGuide();
+          else if (win && win.classList.contains('open')) syncGuideToCurrentContext(true);
         });
       }
     });
@@ -6297,6 +6298,13 @@
       window._activeGuideUtterance = null;
     }
 
+    /* Turning the guide off: stop the current line AND any narration queued
+       for a tab/city change a moment ago, so nothing starts after "off". */
+    function silenceGuide() {
+      if (guideSpeechQueueTimeout) { clearTimeout(guideSpeechQueueTimeout); guideSpeechQueueTimeout = null; }
+      stopGuideSpeech();
+    }
+
     window.replayGuideSpeech = function() {
       const currentText = document.getElementById('guideDialogueText')?.textContent;
       if (currentText) {
@@ -6378,7 +6386,8 @@
       else if (tab === 'language') pose = 'WELCOME';
       else if (tab === 'artisans') pose = 'LISTENING';
 
-      if (forceNarration || isAutoGuideEnabled) {
+      const guideOpen = document.getElementById('guideWindow')?.classList.contains('open');
+      if (forceNarration || (isAutoGuideEnabled && guideOpen)) {
         speakGuideNarration(speechText, pose, null, mood);
       } else {
         const dialogueBox = document.getElementById('guideDialogueText');
@@ -6392,14 +6401,14 @@
     function updateGuideCityContext(cityId) {
       if (guideSpeechQueueTimeout) clearTimeout(guideSpeechQueueTimeout);
       guideSpeechQueueTimeout = setTimeout(() => {
-        syncGuideToCurrentContext(isAutoGuideEnabled);
+        syncGuideToCurrentContext(false);
       }, 400);
     }
 
     function updateGuideSectionContext(tabKey) {
       if (guideSpeechQueueTimeout) clearTimeout(guideSpeechQueueTimeout);
       guideSpeechQueueTimeout = setTimeout(() => {
-        syncGuideToCurrentContext(isAutoGuideEnabled);
+        syncGuideToCurrentContext(false);
       }, 400);
     }
 

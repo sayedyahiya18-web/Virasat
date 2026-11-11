@@ -21,6 +21,11 @@
 
   var IMG = 'assets/images/guide/';
 
+  /* Inside the Android app (WebView user agent carries "VirasatApp") the
+     guide waits to be asked: no intro on page load, and nothing until the
+     visitor taps her — then she explains the page's feature. */
+  var IN_APP = /VirasatApp/i.test(navigator.userAgent || '');
+
   /* The app-wide guide is the female character (her voice is female); the
      Explore page keeps the original male guide, which has the male voice.
      Drop her artwork at assets/images/guide/female_guide.png — a single
@@ -154,7 +159,7 @@
   try { muted = localStorage.getItem('virasat_guide_muted') === '1'; } catch (e) {}
   var closedThisSession = false;
   try { closedThisSession = sessionStorage.getItem('virasat_guide_closed') === '1'; } catch (e) {}
-  if (closedThisSession) wrap.classList.add('closed');
+  if (closedThisSession || IN_APP) wrap.classList.add('closed');
 
   function renderMute() { elMute.textContent = muted ? '🔇 Sound off' : '🔊 Sound on'; }
   renderMute();
@@ -328,13 +333,14 @@
     try { sessionStorage.setItem('virasat_guide_closed', '1'); } catch (e) {}
   });
   elChar.addEventListener('click', function () {
-    if (wrap.classList.contains('closed')) {
+    var wasClosed = wrap.classList.contains('closed');
+    if (wasClosed) {
       wrap.classList.remove('closed');
       try { sessionStorage.removeItem('virasat_guide_closed'); } catch (e) {}
-      if (lastSpoken) elReplay.click();
-    } else {
-      elReplay.click();
     }
+    // In the app she hasn't introduced the page yet: the first tap does it.
+    if (!lastSpoken && script) { say(script.text, script.pose); return; }
+    if (lastSpoken) elReplay.click();
   });
 
   // Turning the page: stop talking so narration never overlaps the next page.
@@ -346,10 +352,10 @@
 
   /* ── Page intro ─────────────────────────────────────────────────────── */
   var script = SCRIPTS[page];
-  if (script) setTimeout(function () { say(script.text, script.pose); }, 700);
+  if (script && !IN_APP) setTimeout(function () { say(script.text, script.pose); }, 700);
 
   /* ── Home page: follow the feature slides ───────────────────────────── */
-  if (page === 'index.html') {
+  if (page === 'index.html' && !IN_APP) {
     var slides = document.querySelectorAll('.feature-slide');
     if (slides.length) {
       var lastFeat = -1, featTimer = 0;

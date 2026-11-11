@@ -99,7 +99,7 @@ ThemeData buildVirasatTheme() {
         borderRadius: BorderRadius.vertical(top: Radius.circular(VRadius.xl)),
       ),
     ),
-    dialogTheme: DialogTheme(
+    dialogTheme: DialogThemeData(
       backgroundColor: VColor.surface,
       surfaceTintColor: Colors.transparent,
       shape: RoundedRectangleBorder(

@@ -10,6 +10,7 @@ import 'screens/explore_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/intro_screen.dart';
 import 'screens/scan_screen.dart';
+import 'native_bridge.dart';
 import 'web_screen.dart';
 
 Future<void> main() async {
@@ -181,6 +182,35 @@ class _ShellScreenState extends State<ShellScreen> {
   int _index = 0;
   final _webKeys = <int, GlobalKey<WebScreenState>>{};
 
+  // A web page's "Home" link → close any pushed pages, show native Home.
+  /// Switching feature: no page may keep narrating in the background.
+  void _silenceAll() {
+    for (final k in _webKeys.values) {
+      k.currentState?.silence();
+    }
+    NativeBridge.stopSpeaking();
+  }
+
+  void _goHome() {
+    if (!mounted) return;
+    _silenceAll();
+    Navigator.of(context).popUntil((r) => r.isFirst);
+    setState(() => _index = 0);
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    WebScreen.onGoHome = _goHome;
+  }
+
+  @override
+  void dispose() {
+    // A replacement shell may already have installed its own handler.
+    if (WebScreen.onGoHome == _goHome) WebScreen.onGoHome = null;
+    super.dispose();
+  }
+
   GlobalKey<WebScreenState> _keyFor(int i) =>
       _webKeys.putIfAbsent(i, () => GlobalKey<WebScreenState>());
 
@@ -198,6 +228,7 @@ class _ShellScreenState extends State<ShellScreen> {
   }
 
   void _openPage(String page, String title) {
+    _silenceAll();
     Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => WebPage(page: page, title: title)),
     );
@@ -206,17 +237,40 @@ class _ShellScreenState extends State<ShellScreen> {
   void _openMore() {
     showModalBottomSheet(
       context: context,
+      // The menu is taller than the default 9/16-screen cap — let it size to
+      // its content, and scroll if a small screen still can't fit it.
+      isScrollControlled: true,
       builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(
-                  VSpace.gutter, VSpace.sm, VSpace.gutter, VSpace.md),
-              child: Text('Everything else', style: VFont.title),
-            ),
-            for (final (label, icon, page) in _moreItems)
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(
+                    VSpace.gutter, VSpace.sm, VSpace.gutter, VSpace.md),
+                child: Text('Everything else', style: VFont.title),
+              ),
+              for (final (label, icon, page) in _moreItems)
+                ListTile(
+                  leading: Container(
+                    width: 38,
+                    height: 38,
+                    decoration: BoxDecoration(
+                      color: VColor.surfaceMuted,
+                      borderRadius: BorderRadius.circular(VRadius.sm),
+                    ),
+                    child: Icon(icon, size: 19, color: VColor.ink),
+                  ),
+                  title: Text(label, style: VFont.label),
+                  trailing: const Icon(Icons.chevron_right_rounded,
+                      color: VColor.inkMuted, size: 20),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _openPage(page, label);
+                  },
+                ),
+              const Divider(height: VSpace.xl),
               ListTile(
                 leading: Container(
                   width: 38,
@@ -225,40 +279,22 @@ class _ShellScreenState extends State<ShellScreen> {
                     color: VColor.surfaceMuted,
                     borderRadius: BorderRadius.circular(VRadius.sm),
                   ),
-                  child: Icon(icon, size: 19, color: VColor.ink),
+                  child: const Icon(Icons.dns_outlined,
+                      size: 19, color: VColor.inkMuted),
                 ),
-                title: Text(label, style: VFont.label),
-                trailing: const Icon(Icons.chevron_right_rounded,
-                    color: VColor.inkMuted, size: 20),
+                title: Text('Server address', style: VFont.label),
+                subtitle: Text(AppConfig.baseUrl,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: VFont.caption),
                 onTap: () {
                   Navigator.pop(ctx);
-                  _openPage(page, label);
+                  _editServer();
                 },
               ),
-            const Divider(height: VSpace.xl),
-            ListTile(
-              leading: Container(
-                width: 38,
-                height: 38,
-                decoration: BoxDecoration(
-                  color: VColor.surfaceMuted,
-                  borderRadius: BorderRadius.circular(VRadius.sm),
-                ),
-                child: const Icon(Icons.dns_outlined,
-                    size: 19, color: VColor.inkMuted),
-              ),
-              title: Text('Server address', style: VFont.label),
-              subtitle: Text(AppConfig.baseUrl,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: VFont.caption),
-              onTap: () {
-                Navigator.pop(ctx);
-                _editServer();
-              },
-            ),
-            const SizedBox(height: VSpace.sm),
-          ],
+              const SizedBox(height: VSpace.sm),
+            ],
+          ),
         ),
       ),
     );
@@ -354,6 +390,7 @@ class _ShellScreenState extends State<ShellScreen> {
             selectedIndex: _index,
             onDestinationSelected: (i) {
               if (_tabs[i].label == 'More') return _openMore();
+              if (i != _index) _silenceAll();
               setState(() => _index = i);
             },
             destinations: [

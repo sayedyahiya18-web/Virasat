@@ -39,6 +39,28 @@ class NativeBridge {
     _tts.setErrorHandler((m) => _ttsOwner?._emitTts('tts.error', error: '$m'));
   }
 
+  /// Cut off whatever is being spoken, app-wide. Called when the visitor
+  /// switches tab, opens or closes a page, or a page navigates away — the
+  /// phone has one TTS engine, so a hidden page would otherwise keep talking.
+  static Future<void> stopSpeaking() async {
+    final owner = _ttsOwner;
+    if (owner != null && owner._speakingId != null) {
+      // Let that page's guide reset its "speaking" state.
+      owner._emitTts('tts.error', error: 'interrupted');
+    }
+    _ttsOwner = null;
+    await _tts.stop();
+  }
+
+  /// Stop speech only if this page is the one talking (page closed or
+  /// navigating). Doesn't message the page — it is going away.
+  Future<void> silence() async {
+    if (_ttsOwner != this) return;
+    _speakingId = null;
+    _ttsOwner = null;
+    await _tts.stop();
+  }
+
   void _emitTts(String type, {String? error}) {
     final id = _speakingId;
     if (id == null) return;

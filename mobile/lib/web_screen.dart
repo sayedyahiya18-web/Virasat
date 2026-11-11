@@ -1,12 +1,15 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_flutter_android/webview_flutter_android.dart';
 
 import 'config.dart';
 import 'native_bridge.dart';
+import 'orientation_polyfill.dart';
 import 'speech_polyfill.dart';
 
 /// Hosts one page of the Virasat platform.
@@ -20,6 +23,11 @@ class WebScreen extends StatefulWidget {
   final String page;
   final bool showBack;
 
+  /// Set by the shell: return to the native Home tab. Web pages link "Home"
+  /// to index.html (the desktop scroll-animation landing), which the app
+  /// replaces with its own home screen.
+  static VoidCallback? onGoHome;
+
   @override
   State<WebScreen> createState() => WebScreenState();
 }
@@ -30,6 +38,13 @@ class WebScreenState extends State<WebScreen>
   late final NativeBridge _bridge;
   double _progress = 0;
   String? _error;
+
+  /// Phone rotation from MainActivity, forwarded into VR pages (see
+  /// orientation_polyfill.dart). Only subscribed while a VR page is loaded.
+  // One shared platform subscription, even if several tabs show VR pages.
+  static final Stream<dynamic> _orientation =
+      const EventChannel('virasat/orientation').receiveBroadcastStream();
+  StreamSubscription<dynamic>? _orientationSub;
 
   @override
   bool get wantKeepAlive => true;
@@ -51,11 +66,19 @@ class WebScreenState extends State<WebScreen>
       ..setNavigationDelegate(NavigationDelegate(
         onProgress: (p) => setState(() => _progress = p / 100),
         onPageStarted: (_) {
+          // Leaving a page: its guide must not keep talking over the next one.
+          _bridge.silence();
           setState(() => _error = null);
-          // Install the speech shim before the page's own scripts look for it.
+          // Install the shims before the page's own scripts look for them.
           _controller.runJavaScript(kSpeechPolyfillJs);
+          _controller.runJavaScript(kOrientationPolyfillJs);
         },
-        onPageFinished: (_) => _controller.runJavaScript(kSpeechPolyfillJs),
+        onPageFinished: (url) {
+          _controller.runJavaScript(kSpeechPolyfillJs);
+          _controller.runJavaScript(kOrientationPolyfillJs);
+          _syncOrientation(url);
+        },
+        onUrlChange: (change) => _syncOrientation(change.url),
         onWebResourceError: (e) {
           if (e.isForMainFrame ?? true) {
             setState(() => _error = e.description);
@@ -65,6 +88,10 @@ class WebScreenState extends State<WebScreen>
           // Keep the platform in-app; hand everything else to the OS.
           final u = Uri.parse(req.url);
           final base = Uri.parse(AppConfig.baseUrl);
+          if (u.host == base.host && _isWebHome(u.path)) {
+            WebScreen.onGoHome?.call();
+            return NavigationDecision.prevent;
+          }
           if (u.host == base.host ||
               u.scheme == 'about' ||
               u.scheme == 'blob') {
@@ -84,6 +111,43 @@ class WebScreenState extends State<WebScreen>
     }
 
     _controller.loadRequest(AppConfig.page(widget.page));
+  }
+
+  static bool _isWebHome(String path) {
+    final p = path.toLowerCase();
+    return p.isEmpty || p == '/' || p.endsWith('/index.html');
+  }
+
+  /// Stream the gyro into the page only while a VR scene is showing.
+  void _syncOrientation(String? url) {
+    final path = Uri.tryParse(url ?? '')?.path.toLowerCase() ?? '';
+    final isVr = path.endsWith('/vr.html') || path.contains('/vr/');
+    if (isVr && _orientationSub == null) {
+      _orientationSub = _orientation.listen((v) {
+        final a = (v as List).cast<double>();
+        _controller.runJavaScript(
+            'window.__vnOrient&&window.__vnOrient(${a[0]},${a[1]},${a[2]})');
+      }, onError: (_) {});
+    } else if (!isVr && _orientationSub != null) {
+      _orientationSub!.cancel();
+      _orientationSub = null;
+    }
+  }
+
+  /// Quiet this page: stop its guide (browser voice or neural audio) and
+  /// the native TTS if it is the one speaking. Used when the tab is hidden.
+  void silence() {
+    _controller.runJavaScript(
+        'window.VirasatGuide&&window.VirasatGuide.stop();'
+        'window.speechSynthesis&&window.speechSynthesis.cancel();');
+    _bridge.silence();
+  }
+
+  @override
+  void dispose() {
+    _orientationSub?.cancel();
+    _bridge.silence();
+    super.dispose();
   }
 
   /// Web page asked for camera/mic → ask the OS once, then grant.
