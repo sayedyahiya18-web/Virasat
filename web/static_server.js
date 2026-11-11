@@ -3,7 +3,8 @@ const fs = require('fs');
 const path = require('path');
 const zlib = require('zlib');
 
-const PORT = 8081;
+// Hosts (Render, Railway, ...) assign the public port through $PORT.
+const PORT = Number(process.env.PORT) || 8081;
 
 /* The AI features (Virasat Mitr, VR guide, translator, scanner narration)
    all talk to the Groq proxy in server.js on :3005. Every one of them
@@ -19,7 +20,8 @@ function ensureAiProxy() {
   probe.once('error', () => {
     probe.destroy();
     const { fork } = require('child_process');
-    const child = fork(path.join(__dirname, 'server.js'), [], { stdio: 'inherit' });
+    // server.js also reads $PORT: pin it to 3005 so it never grabs the public port.
+    const child = fork(path.join(__dirname, 'server.js'), [], { stdio: 'inherit', env: { ...process.env, PORT: '3005' } });
     child.on('exit', code => console.warn(`⚠️  AI proxy exited (code ${code}). Restart with: node server.js`));
     process.on('exit', () => { try { child.kill(); } catch (e) {} });
   });
@@ -171,4 +173,4 @@ function startStaticServer(port) {
   });
 }
 
-startStaticServer(8081);
+startStaticServer(PORT);
